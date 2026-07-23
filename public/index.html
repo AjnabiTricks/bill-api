@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PITC Bill Search</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f0f2f5;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #1a237e; margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 20px; }
+        .search-box {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        input {
+            flex: 1;
+            padding: 14px 18px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            min-width: 200px;
+        }
+        input:focus { outline: none; border-color: #1a237e; }
+        button {
+            padding: 14px 30px;
+            background: #1a237e;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0d1555; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .quick-links {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .quick-btn {
+            padding: 8px 16px;
+            background: #e8eaf6;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .quick-btn:hover { background: #c5cae9; }
+        #result {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            min-height: 100px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 14px;
+            border: 1px solid #e9ecef;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .loading { color: #1a237e; }
+        .error { color: #d32f2f; }
+        .success { color: #2e7d32; }
+        .stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+            padding: 15px;
+            background: #e8eaf6;
+            border-radius: 8px;
+        }
+        .stat-item { font-size: 14px; }
+        .stat-label { color: #666; }
+        .stat-value { font-weight: bold; color: #1a237e; }
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            color: #999;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⚡ PITC Bill Search</h1>
+        <p class="subtitle">Search by Reference, CNIC, or Mobile Number</p>
+
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="e.g., 07121431357901, 3410237236101, or 03076231799" />
+            <button id="searchBtn" onclick="search()">🔍 Search</button>
+        </div>
+
+        <div class="quick-links">
+            <button class="quick-btn" onclick="quickSearch('07121431357901')">📄 Reference</button>
+            <button class="quick-btn" onclick="quickSearch('3410237236101')">🪪 CNIC</button>
+            <button class="quick-btn" onclick="quickSearch('03076231799')">📱 Mobile</button>
+        </div>
+
+        <div id="stats" class="stats" style="display:none;">
+            <div class="stat-item"><span class="stat-label">Search Type:</span> <span class="stat-value" id="searchType">-</span></div>
+            <div class="stat-item"><span class="stat-label">Records Found:</span> <span class="stat-value" id="recordCount">0</span></div>
+        </div>
+
+        <div id="result">Enter a search value and click Search...</div>
+        <div class="footer">Powered by PITC | Data from ccms.pitc.com.pk</div>
+    </div>
+
+    <script>
+        function detectSearchType(value) {
+            const clean = value.replace(/[-\s]/g, '');
+            if (/^[3-4]\d{12}$/.test(clean)) return 'cnic';
+            if (/^(92|03)\d{9,10}$/.test(clean)) return 'mobile';
+            return 'reference';
+        }
+
+        function formatPayload(value) {
+            const type = detectSearchType(value);
+            const clean = value.replace(/[-\s]/g, '');
+            
+            if (type === 'cnic') return `cnic=${encodeURIComponent(clean)}`;
+            if (type === 'mobile') {
+                const mobile = clean.replace(/^0/, '92');
+                return `mobile=${encodeURIComponent(mobile)}`;
+            }
+            return `reference=${encodeURIComponent(value)}`;
+        }
+
+        async function performSearch(value) {
+            const resultDiv = document.getElementById('result');
+            const statsDiv = document.getElementById('stats');
+            const searchBtn = document.getElementById('searchBtn');
+            
+            resultDiv.className = 'loading';
+            resultDiv.textContent = '🔄 Searching... Please wait.';
+            searchBtn.disabled = true;
+            statsDiv.style.display = 'none';
+
+            try {
+                const payload = formatPayload(value);
+                const searchType = detectSearchType(value);
+                const displayType = searchType === 'cnic' ? 'CNIC' : searchType === 'mobile' ? 'Mobile' : 'Reference';
+
+                // ✅ Direct browser request (works!)
+                const response = await fetch('https://ccms.pitc.com.pk/api/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Origin': 'https://ccms.pitc.com.pk',
+                        'Referer': 'https://ccms.pitc.com.pk/complaint'
+                    },
+                    body: payload
+                });
+
+                const text = await response.text();
+                
+                // Check for HTML (session expired)
+                if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                    resultDiv.className = 'error';
+                    resultDiv.textContent = '❌ Session expired. Please refresh the page and try again.';
+                    return;
+                }
+
+                const data = JSON.parse(text);
+                
+                // Show stats
+                statsDiv.style.display = 'flex';
+                document.getElementById('searchType').textContent = displayType;
+                document.getElementById('recordCount').textContent = data.data?.length || 0;
+
+                // Format results
+                if (data.data && data.data.length > 0) {
+                    resultDiv.className = 'success';
+                    let output = '';
+                    data.data.forEach((item, index) => {
+                        output += `📋 Record ${index + 1}:\n`;
+                        output += `   Reference: ${item.REFNO || '-'}\n`;
+                        output += `   Name: ${item.NAME || '-'}\n`;
+                        output += `   Father: ${item.FNAME || '-'}\n`;
+                        output += `   Address: ${item.ADDR1 || ''} ${item.ADDR2 || ''}\n`;
+                        output += `   Contact: ${item.CONTACTNO || '-'}\n`;
+                        output += `   CNIC: ${item.NICNO || '-'}\n`;
+                        output += `   Status: ${item.CURSTATUS || '-'}\n`;
+                        output += `   Load: ${item.SLOAD || '-'} KW\n`;
+                        output += `   Connection Date: ${item.CONDATE || '-'}\n`;
+                        output += `   Feeder: ${item.FEEDERCD || '-'}\n`;
+                        output += '-' .repeat(40) + '\n\n';
+                    });
+                    resultDiv.textContent = output;
+                } else {
+                    resultDiv.className = 'error';
+                    resultDiv.textContent = '❌ No records found for: ' + value;
+                }
+
+            } catch (error) {
+                resultDiv.className = 'error';
+                resultDiv.textContent = '❌ Error: ' + error.message;
+            } finally {
+                searchBtn.disabled = false;
+            }
+        }
+
+        async function search() {
+            const input = document.getElementById('searchInput');
+            const value = input.value.trim();
+            if (!value) {
+                alert('Please enter a search value');
+                return;
+            }
+            await performSearch(value);
+        }
+
+        function quickSearch(value) {
+            document.getElementById('searchInput').value = value;
+            performSearch(value);
+        }
+
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') search();
+        });
+    </script>
+</body>
+</html>
