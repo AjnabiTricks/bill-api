@@ -1,7 +1,3 @@
-// Store cookies globally to maintain session
-let storedCookies = '';
-let cookieExpiry = null;
-
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,18 +11,14 @@ export default async function handler(req, res) {
   try {
     let searchValue;
 
-    // GET: Read from query parameters
     if (req.method === 'GET') {
       searchValue = req.query.search || req.query.reference || req.query.cnic || req.query.mobile;
-    } 
-    // POST: Read from JSON body
-    else if (req.method === 'POST') {
+    } else if (req.method === 'POST') {
       searchValue = req.body.search || req.body.reference || req.body.cnic || req.body.mobile;
     } else {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    // Validate
     if (!searchValue) {
       return res.status(400).json({
         success: false,
@@ -53,83 +45,87 @@ export default async function handler(req, res) {
 
     console.log('Search:', { searchValue, searchType, requestBody });
 
-    // ✅ FIRST, visit the homepage to get session cookies
-    if (!storedCookies) {
-      console.log('🔄 Fetching initial session...');
-      const homeResponse = await fetch('https://ccms.pitc.com.pk/complaint', {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-        }
-      });
-
-      // Extract cookies from response
-      const setCookie = homeResponse.headers.get('set-cookie');
-      if (setCookie) {
-        storedCookies = setCookie.split(',')
-          .map(c => c.split(';')[0])
-          .join('; ');
-        console.log('✅ Session cookies obtained:', storedCookies);
+    // ============= STEP 1: Get CSRF Token and Session =============
+    console.log('🔄 Getting CSRF token and session...');
+    
+    const homeResponse = await fetch('https://ccms.pitc.com.pk/complaint', {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1'
       }
+    });
+
+    const homeHtml = await homeResponse.text();
+    
+    // Extract CSRF token from HTML
+    let csrfToken = '';
+    const tokenMatch = homeHtml.match(/name="_token"[^>]*value="([^"]+)"/) || 
+                       homeHtml.match(/XSRF-TOKEN[^;]+;[\s]*value="([^"]+)"/) ||
+                       homeHtml.match(/csrf-token" content="([^"]+)"/);
+    
+    if (tokenMatch) {
+      csrfToken = tokenMatch[1];
+      console.log('✅ CSRF Token extracted:', csrfToken.substring(0, 20) + '...');
     }
 
-    // ✅ FORWARD to original API with cookies
+    // Extract session cookies
+    const setCookieHeader = homeResponse.headers.get('set-cookie') || '';
+    const cookies = setCookieHeader.split(',').map(c => c.split(';')[0].trim()).join('; ');
+    console.log('✅ Session cookies obtained');
+
+    // ============= STEP 2: Make the actual API call =============
+    console.log('🔄 Making search request...');
+    
+    const searchHeaders = {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json, text/javascript, */*; q=0.01',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Origin': 'https://ccms.pitc.com.pk',
+      'Referer': 'https://ccms.pitc.com.pk/complaint',
+      'Connection': 'keep-alive',
+      'Cookie': cookies,
+      'Cache-Control': 'no-cache',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin'
+    };
+
+    // Add CSRF token if found
+    if (csrfToken) {
+      searchHeaders['X-CSRF-TOKEN'] = csrfToken;
+      // Also try adding to body
+      requestBody += `&_token=${encodeURIComponent(csrfToken)}`;
+    }
+
     const response = await fetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Origin': 'https://ccms.pitc.com.pk',
-        'Referer': 'https://ccms.pitc.com.pk/complaint',
-        'Connection': 'keep-alive',
-        'Cache-Control': 'no-cache',
-        // ✅ Add stored cookies
-        'Cookie': storedCookies
-      },
+      headers: searchHeaders,
       body: requestBody
     });
 
-    // Get response as text first
     const responseText = await response.text();
     
-    // ✅ Update cookies if new ones come in
-    const newCookies = response.headers.get('set-cookie');
-    if (newCookies) {
-      storedCookies = newCookies.split(',')
-        .map(c => c.split(';')[0])
-        .join('; ');
-      console.log('🔄 Session updated');
-    }
-
-    // Check if response is HTML (session still expired)
+    // Check if response is valid JSON
     if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-      // Try to get fresh session and retry
-      console.log('⚠️ Session expired, refreshing...');
-      storedCookies = ''; // Clear stored cookies
+      // Try one more time with different approach
+      console.log('⚠️ Got HTML response, trying alternate method...');
       
-      // Get fresh session
-      const freshHome = await fetch('https://ccms.pitc.com.pk/complaint', {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        }
-      });
-      
-      const freshSetCookie = freshHome.headers.get('set-cookie');
-      if (freshSetCookie) {
-        storedCookies = freshSetCookie.split(',')
-          .map(c => c.split(';')[0])
-          .join('; ');
-      }
-      
-      // Retry the search
-      const retryResponse = await fetch('https://ccms.pitc.com.pk/api/search', {
+      // Try using the session from headers
+      const altResponse = await fetch('https://ccms.pitc.com.pk/api/search', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -138,44 +134,43 @@ export default async function handler(req, res) {
           'Accept': 'application/json, text/javascript, */*; q=0.01',
           'Origin': 'https://ccms.pitc.com.pk',
           'Referer': 'https://ccms.pitc.com.pk/complaint',
-          'Cookie': storedCookies
+          'Cookie': cookies
         },
-        body: requestBody
+        body: requestBody.replace(/&_token=[^&]*/, '') // Remove token if present
       });
       
-      const retryText = await retryResponse.text();
+      const altText = await altResponse.text();
       
-      if (retryText.includes('<!DOCTYPE') || retryText.includes('<html')) {
+      if (altText.includes('<!DOCTYPE') || altText.includes('<html')) {
         return res.status(500).json({
           success: false,
-          error: 'Unable to establish session with upstream server',
-          details: 'The server is blocking requests. Please try again later.'
+          error: 'Server requires authentication',
+          details: 'The upstream server cannot be accessed without proper session.',
+          suggestion: 'Try accessing https://ccms.pitc.com.pk in your browser first'
         });
       }
       
-      // Parse retry response
-      let data;
+      // Parse the alternative response
       try {
-        data = JSON.parse(retryText);
+        const data = JSON.parse(altText);
+        return formatResponse(data, searchValue, searchType, req.method);
       } catch (e) {
         return res.status(500).json({
           success: false,
-          error: 'Invalid response after session refresh',
-          raw: retryText.substring(0, 200)
+          error: 'Could not parse response after retry',
+          raw: altText.substring(0, 200)
         });
       }
-      
-      return formatResponse(data, searchValue, searchType, req.method);
     }
 
-    // Parse JSON response
+    // Parse successful JSON response
     let data;
     try {
       data = JSON.parse(responseText);
     } catch (parseError) {
       return res.status(500).json({
         success: false,
-        error: 'Invalid response from upstream server',
+        error: 'Invalid response format',
         raw: responseText.substring(0, 200)
       });
     }
@@ -192,7 +187,7 @@ export default async function handler(req, res) {
   }
 }
 
-// 📦 Helper function to format response with address
+// 📦 Helper function to format response
 function formatResponse(data, searchValue, searchType, method) {
   const formattedData = (data.data || []).map(item => ({
     reference: item.REFNO || '',
@@ -225,4 +220,4 @@ function formatResponse(data, searchValue, searchType, method) {
     data: formattedData,
     message: data.message || 'Success'
   };
-  }
+    }
