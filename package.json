@@ -1,0 +1,14 @@
+{
+  "name": "bill-api",
+  "version": "1.0.0",
+  "description": "API to search electricity bills via reference number",
+  "main": "api/search.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel deploy --prod"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vercel": "^35.0.0"
+  }
+}
