@@ -1,3 +1,7 @@
+// Store cookies globally to maintain session
+let storedCookies = '';
+let cookieExpiry = null;
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -49,7 +53,29 @@ export default async function handler(req, res) {
 
     console.log('Search:', { searchValue, searchType, requestBody });
 
-    // FORWARD to original API with COMPLETE headers
+    // ✅ FIRST, visit the homepage to get session cookies
+    if (!storedCookies) {
+      console.log('🔄 Fetching initial session...');
+      const homeResponse = await fetch('https://ccms.pitc.com.pk/complaint', {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        }
+      });
+
+      // Extract cookies from response
+      const setCookie = homeResponse.headers.get('set-cookie');
+      if (setCookie) {
+        storedCookies = setCookie.split(',')
+          .map(c => c.split(';')[0])
+          .join('; ');
+        console.log('✅ Session cookies obtained:', storedCookies);
+      }
+    }
+
+    // ✅ FORWARD to original API with cookies
     const response = await fetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
       headers: {
@@ -61,70 +87,100 @@ export default async function handler(req, res) {
         'Origin': 'https://ccms.pitc.com.pk',
         'Referer': 'https://ccms.pitc.com.pk/complaint',
         'Connection': 'keep-alive',
-        'Cache-Control': 'no-cache'
+        'Cache-Control': 'no-cache',
+        // ✅ Add stored cookies
+        'Cookie': storedCookies
       },
       body: requestBody
     });
 
     // Get response as text first
     const responseText = await response.text();
-    console.log('Raw response:', responseText.substring(0, 200)); // Log first 200 chars
+    
+    // ✅ Update cookies if new ones come in
+    const newCookies = response.headers.get('set-cookie');
+    if (newCookies) {
+      storedCookies = newCookies.split(',')
+        .map(c => c.split(';')[0])
+        .join('; ');
+      console.log('🔄 Session updated');
+    }
 
-    // Try to parse JSON
+    // Check if response is HTML (session still expired)
+    if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+      // Try to get fresh session and retry
+      console.log('⚠️ Session expired, refreshing...');
+      storedCookies = ''; // Clear stored cookies
+      
+      // Get fresh session
+      const freshHome = await fetch('https://ccms.pitc.com.pk/complaint', {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+      });
+      
+      const freshSetCookie = freshHome.headers.get('set-cookie');
+      if (freshSetCookie) {
+        storedCookies = freshSetCookie.split(',')
+          .map(c => c.split(';')[0])
+          .join('; ');
+      }
+      
+      // Retry the search
+      const retryResponse = await fetch('https://ccms.pitc.com.pk/api/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With': 'XMLHttpRequest',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'Origin': 'https://ccms.pitc.com.pk',
+          'Referer': 'https://ccms.pitc.com.pk/complaint',
+          'Cookie': storedCookies
+        },
+        body: requestBody
+      });
+      
+      const retryText = await retryResponse.text();
+      
+      if (retryText.includes('<!DOCTYPE') || retryText.includes('<html')) {
+        return res.status(500).json({
+          success: false,
+          error: 'Unable to establish session with upstream server',
+          details: 'The server is blocking requests. Please try again later.'
+        });
+      }
+      
+      // Parse retry response
+      let data;
+      try {
+        data = JSON.parse(retryText);
+      } catch (e) {
+        return res.status(500).json({
+          success: false,
+          error: 'Invalid response after session refresh',
+          raw: retryText.substring(0, 200)
+        });
+      }
+      
+      return formatResponse(data, searchValue, searchType, req.method);
+    }
+
+    // Parse JSON response
     let data;
     try {
       data = JSON.parse(responseText);
     } catch (parseError) {
-      // If parsing fails, check if response is HTML (session expired)
-      if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-        return res.status(500).json({
-          success: false,
-          error: 'Upstream server returned HTML (session may have expired)',
-          details: 'The original server requires a valid session. Try again later.'
-        });
-      }
       return res.status(500).json({
         success: false,
         error: 'Invalid response from upstream server',
-        raw: responseText.substring(0, 200) // Show first 200 chars for debugging
+        raw: responseText.substring(0, 200)
       });
     }
 
-    // ✅ FORMAT RESPONSE with COMPLETE ADDRESS
-    const formattedData = (data.data || []).map(item => ({
-      reference: item.REFNO || '',
-      name: item.NAME || '',
-      fatherName: item.FNAME || '',
-      // 🏠 COMPLETE ADDRESS FIELDS
-      address: {
-        line1: item.ADDR1 || '',
-        line2: item.ADDR2 || '',
-        full: `${item.ADDR1 || ''} ${item.ADDR2 || ''}`.trim()
-      },
-      contactNumber: item.CONTACTNO || '',
-      cnic: item.NICNO || '',
-      connectionDate: item.CONDATE || '',
-      tariff: item.TARIFF || '',
-      load: item.SLOAD || '',
-      feederCode: item.FEEDERCD || '',
-      gpsLocation: {
-        latitude: item.GPSLATI || '0',
-        longitude: item.GPSLONG || '0'
-      },
-      status: item.CURSTATUS || '',
-      // Raw data for reference (optional)
-      _raw: item
-    }));
-
-    return res.status(200).json({
-      success: true,
-      method: req.method,
-      searchValue: searchValue,
-      detectedAs: searchType,
-      count: formattedData.length,
-      data: formattedData,
-      message: data.message || 'Success'
-    });
+    return formatResponse(data, searchValue, searchType, req.method);
 
   } catch (error) {
     console.error('Error:', error);
@@ -134,4 +190,39 @@ export default async function handler(req, res) {
       message: error.message
     });
   }
-      }
+}
+
+// 📦 Helper function to format response with address
+function formatResponse(data, searchValue, searchType, method) {
+  const formattedData = (data.data || []).map(item => ({
+    reference: item.REFNO || '',
+    name: item.NAME || '',
+    fatherName: item.FNAME || '',
+    address: {
+      line1: item.ADDR1 || '',
+      line2: item.ADDR2 || '',
+      full: `${item.ADDR1 || ''} ${item.ADDR2 || ''}`.trim()
+    },
+    contactNumber: item.CONTACTNO || '',
+    cnic: item.NICNO || '',
+    connectionDate: item.CONDATE || '',
+    tariff: item.TARIFF || '',
+    load: item.SLOAD || '',
+    feederCode: item.FEEDERCD || '',
+    gpsLocation: {
+      latitude: item.GPSLATI || '0',
+      longitude: item.GPSLONG || '0'
+    },
+    status: item.CURSTATUS || ''
+  }));
+
+  return {
+    success: true,
+    method: method,
+    searchValue: searchValue,
+    detectedAs: searchType,
+    count: formattedData.length,
+    data: formattedData,
+    message: data.message || 'Success'
+  };
+  }
