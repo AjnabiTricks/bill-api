@@ -141,6 +141,27 @@
             font-size: 14px;
             border-left: 4px solid #ffc107;
         }
+        .method-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .method-btn {
+            padding: 8px 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .method-btn.active {
+            border-color: #1a237e;
+            background: #e8eaf6;
+            font-weight: 600;
+        }
+        .method-btn:hover { border-color: #1a237e; }
         @media (max-width: 600px) {
             .container { padding: 20px; }
             h1 { font-size: 22px; }
@@ -153,8 +174,14 @@
         <p class="subtitle">Search electricity bills by Reference, CNIC, or Mobile Number</p>
 
         <div class="note">
-            💡 This tool works directly in your browser. No server-side processing is involved.
-            Your data is safe and stays in your browser.
+            💡 <strong>Note:</strong> This tool works directly in your browser. 
+            If you get a "Failed to fetch" error, try the <strong>"Use Proxy"</strong> option below.
+        </div>
+
+        <div class="method-selector">
+            <button class="method-btn active" id="directBtn" onclick="setMethod('direct')">🌐 Direct</button>
+            <button class="method-btn" id="proxyBtn" onclick="setMethod('proxy')">🔄 Use Proxy</button>
+            <button class="method-btn" id="corsBtn" onclick="setMethod('cors')">🔀 CORS Anywhere</button>
         </div>
 
         <div class="search-box">
@@ -180,8 +207,8 @@
                 <span class="status-value" id="recordCount">0</span>
             </div>
             <div class="status-item">
-                <span class="status-label">⚡ Status:</span>
-                <span class="status-value" id="statusMessage">Ready</span>
+                <span class="status-label">⚡ Method:</span>
+                <span class="status-value" id="methodUsed">-</span>
             </div>
         </div>
 
@@ -193,6 +220,20 @@
     </div>
 
     <script>
+        // ============= CONFIGURATION =============
+        let currentMethod = 'direct'; // 'direct', 'proxy', 'cors'
+
+        function setMethod(method) {
+            currentMethod = method;
+            document.querySelectorAll('.method-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(method + 'Btn').classList.add('active');
+            
+            // Show which method is active
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = '';
+            resultDiv.textContent = `🔄 Method changed to: ${method.toUpperCase()}. Enter a search value and click Search.`;
+        }
+
         // ============= SMART SEARCH DETECTION =============
         function detectSearchType(value) {
             const clean = value.replace(/[-\s]/g, '');
@@ -213,6 +254,21 @@
             return `reference=${encodeURIComponent(value)}`;
         }
 
+        // ============= GET SEARCH URL =============
+        function getSearchUrl(method) {
+            const baseUrl = 'https://ccms.pitc.com.pk/api/search';
+            
+            switch(method) {
+                case 'proxy':
+                    return 'https://corsproxy.io/?' + encodeURIComponent(baseUrl);
+                case 'cors':
+                    return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(baseUrl);
+                case 'direct':
+                default:
+                    return baseUrl;
+            }
+        }
+
         // ============= MAIN SEARCH FUNCTION =============
         async function performSearch(value) {
             const resultDiv = document.getElementById('result');
@@ -228,13 +284,19 @@
                 const payload = formatPayload(value);
                 const searchType = detectSearchType(value);
                 const displayType = searchType === 'cnic' ? 'CNIC' : searchType === 'mobile' ? 'Mobile' : 'Reference';
+                
+                const url = getSearchUrl(currentMethod);
+                const methodDisplay = currentMethod.toUpperCase();
+                
+                console.log(`🔍 Searching with ${methodDisplay}:`, { value, payload, url });
 
-                // ✅ DIRECT BROWSER REQUEST - WORKS 100%!
-                const response = await fetch('https://ccms.pitc.com.pk/api/search', {
+                // ✅ MAKE REQUEST
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                         'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json, text/javascript, */*; q=0.01',
                         'Origin': 'https://ccms.pitc.com.pk',
                         'Referer': 'https://ccms.pitc.com.pk/complaint'
                     },
@@ -243,8 +305,18 @@
 
                 const text = await response.text();
                 
-                // Check for HTML response (session issue)
+                // Check for HTML response
                 if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+                    // If direct method failed, suggest trying proxy
+                    if (currentMethod === 'direct') {
+                        resultDiv.className = 'error';
+                        resultDiv.textContent = '❌ Direct request failed. Try clicking "Use Proxy" or "CORS Anywhere" button above.';
+                        statusBar.style.display = 'flex';
+                        document.getElementById('statusMessage').textContent = 'CORS Blocked';
+                        document.getElementById('statusMessage').style.color = '#d32f2f';
+                        return;
+                    }
+                    
                     resultDiv.className = 'error';
                     resultDiv.textContent = '❌ Session expired. Please refresh the page and try again.';
                     statusBar.style.display = 'flex';
@@ -267,6 +339,7 @@
                 statusBar.style.display = 'flex';
                 document.getElementById('searchType').textContent = displayType;
                 document.getElementById('recordCount').textContent = data.data?.length || 0;
+                document.getElementById('methodUsed').textContent = methodDisplay;
                 document.getElementById('statusMessage').textContent = 'Success';
                 document.getElementById('statusMessage').style.color = '#2e7d32';
 
@@ -297,10 +370,19 @@
 
             } catch (error) {
                 resultDiv.className = 'error';
-                resultDiv.textContent = '❌ Error: ' + error.message;
+                
+                let errorMsg = '❌ Error: ' + error.message;
+                
+                // Suggest using proxy if direct fails
+                if (currentMethod === 'direct' && error.message.includes('Failed to fetch')) {
+                    errorMsg += '\n\n💡 Try clicking "Use Proxy" or "CORS Anywhere" button above.';
+                }
+                
+                resultDiv.textContent = errorMsg;
                 statusBar.style.display = 'flex';
                 document.getElementById('statusMessage').textContent = 'Network Error';
                 document.getElementById('statusMessage').style.color = '#d32f2f';
+                document.getElementById('methodUsed').textContent = currentMethod.toUpperCase();
             } finally {
                 searchBtn.disabled = false;
             }
