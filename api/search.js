@@ -4,81 +4,88 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Only allow POST
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
   try {
-    const { reference, cnic, mobile } = req.body;
+    let searchValue;
 
-    // Validate: At least one search parameter is required
-    if (!reference && !cnic && !mobile) {
+    // ✅ GET: Read from query parameters
+    if (req.method === 'GET') {
+      searchValue = req.query.search || req.query.reference || req.query.cnic || req.query.mobile;
+    } 
+    // ✅ POST: Read from JSON body
+    else if (req.method === 'POST') {
+      searchValue = req.body.search || req.body.reference || req.body.cnic || req.body.mobile;
+    } else {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
+
+    // Validate
+    if (!searchValue) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide at least one: reference, cnic, or mobile'
+        error: 'Please provide a search parameter (reference, cnic, or mobile)'
       });
     }
 
-    // Build the request body
+    // 🧠 SMART DETECTION: Auto-detect what was sent
     let requestBody = '';
+    let searchType = 'unknown';
+
+    // Remove dashes and spaces for clean comparison
+    const cleanValue = searchValue.replace(/[-\s]/g, '');
     
-    if (reference) {
-      requestBody = `reference=${encodeURIComponent(reference)}`;
-    } else if (cnic) {
-      const cleanCnic = cnic.replace(/-/g, '');
-      requestBody = `cnic=${encodeURIComponent(cleanCnic)}`;
-    } else if (mobile) {
-      const cleanMobile = mobile.replace(/^0/, '92');
-      requestBody = `mobile=${encodeURIComponent(cleanMobile)}`;
+    // Check if it's a CNIC (13 digits, starts with 3 or 4)
+    if (/^[3-4]\d{12}$/.test(cleanValue)) {
+      requestBody = `cnic=${encodeURIComponent(cleanValue)}`;
+      searchType = 'cnic';
+    }
+    // Check if it's a Mobile Number (starts with 92 or 03, 11-12 digits)
+    else if (/^(92|03)\d{9,10}$/.test(cleanValue)) {
+      const mobile = cleanValue.replace(/^0/, '92');
+      requestBody = `mobile=${encodeURIComponent(mobile)}`;
+      searchType = 'mobile';
+    }
+    // Default: Treat as Reference Number
+    else {
+      requestBody = `reference=${encodeURIComponent(searchValue)}`;
+      searchType = 'reference';
     }
 
-    // Forward request to original API with COMPLETE headers
+    console.log('Search:', { searchValue, searchType, requestBody });
+
+    // Forward request to original API
     const response = await fetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
         'Origin': 'https://ccms.pitc.com.pk',
         'Referer': 'https://ccms.pitc.com.pk/complaint',
-        'Sec-Fetch-Site': 'same-origin',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Dest': 'empty',
-        'Connection': 'keep-alive'
       },
       body: requestBody
     });
 
-    // Get response as text first to handle any issues
     const responseText = await response.text();
-    
-    // Try to parse JSON
     let data;
     try {
       data = JSON.parse(responseText);
     } catch (parseError) {
-      // If not JSON, return error
       return res.status(500).json({
         success: false,
         error: 'Invalid response from upstream server',
-        raw: responseText.substring(0, 200) // First 200 chars for debugging
       });
     }
 
-    // Return success response
     return res.status(200).json({
       success: true,
-      searchBy: reference ? 'reference' : cnic ? 'cnic' : 'mobile',
-      searchValue: reference || cnic || mobile,
+      method: req.method,
+      searchValue: searchValue,
+      detectedAs: searchType, // Tells you what was detected
       data: data.data || [],
       message: data.message || 'Success',
       count: data.data ? data.data.length : 0
@@ -92,4 +99,4 @@ export default async function handler(req, res) {
       message: error.message
     });
   }
-      }
+}
