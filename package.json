@@ -1,7 +1,7 @@
 {
   "name": "bill-api",
-  "version": "2.0.0",
-  "description": "Multi-search API for electricity bills",
+  "version": "3.0.0",
+  "description": "PITC Bill Search API",
   "main": "api/search.js",
   "scripts": {
     "dev": "vercel dev",
