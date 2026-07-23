@@ -1,13 +1,10 @@
 {
   "name": "bill-api",
   "version": "3.0.0",
-  "description": "PITC Bill Search API",
-  "main": "api/search.js",
+  "description": "PITC Bill Search - Browser Based",
   "scripts": {
-    "dev": "vercel dev",
     "deploy": "vercel deploy --prod"
   },
-  "dependencies": {},
   "devDependencies": {
     "vercel": "^35.0.0"
   }
