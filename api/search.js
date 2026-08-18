@@ -86,4 +86,4 @@ export default async function handler(req, res) {
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
-      }
+}
