@@ -2,7 +2,6 @@
 import { authenticatedFetch } from '../lib/session.js';
 
 export default async function handler(req, res) {
-  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,7 +10,6 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // 🔹 Search term support: cnic, mobile, reference, q
   const searchTerm = req.method === 'GET' 
     ? req.query.cnic || req.query.mobile || req.query.reference || req.query.q
     : req.body.cnic || req.body.mobile || req.body.reference || req.body.q;
@@ -25,16 +23,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 🔹 STEP 1: Search API
+    // Step 1: Search
     const searchResponse = await authenticatedFetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
       body: new URLSearchParams({ reference: searchTerm })
     });
 
+    // 🔹 CHECK: Agar response HTML hai toh error throw karein
+    const contentType = searchResponse.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      throw new Error('PITC server returned HTML (session expired or invalid request)');
+    }
+
     const searchData = await searchResponse.json();
 
-    // Agar user nahi mila
     if (!searchData.user || !searchData.user.REFNO) {
       return res.status(404).json({
         success: false,
@@ -47,7 +50,7 @@ export default async function handler(req, res) {
     const user = searchData.user;
     const refno = user.REFNO;
 
-    // 🔹 STEP 2: Feeder Details (Parallel calls for speed)
+    // Step 2: Feeder & User Details
     const [feederRes, userDetailsRes] = await Promise.all([
       authenticatedFetch(`https://ccms.pitc.com.pk/getFeederDetails?reference=${refno}`),
       authenticatedFetch(`https://ccms.pitc.com.pk/api/details/user?reference=${refno}`)
@@ -56,7 +59,6 @@ export default async function handler(req, res) {
     const feederData = await feederRes.json();
     const userDetailsData = await userDetailsRes.json();
 
-    // 🔹 STEP 3: Sirf Consumer Details Return karein
     return res.status(200).json({
       success: true,
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)',
@@ -86,4 +88,4 @@ export default async function handler(req, res) {
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
-}
+                                                }
