@@ -2,7 +2,7 @@
   "name": "bill-api",
   "version": "1.0.0",
   "type": "module",
-  "description": "PITC CCMS Bill Search API - Credit: AZ Tricks (https://t.me/AZ_Tricks)",
+  "description": "All-in-One PITC Bill API - Credit: AZ Tricks (https://t.me/AZ_Tricks)",
   "scripts": {
     "dev": "node api/search.js"
   }
