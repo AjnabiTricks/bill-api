@@ -23,7 +23,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 🔹 Check session first
+    // Check session first
     const sessionStatus = await checkSession();
     if (!sessionStatus.active) {
       console.log('⚠️ Session not active, attempting to initialize...');
@@ -40,12 +40,12 @@ export default async function handler(req, res) {
       body: new URLSearchParams({ reference: searchTerm })
     });
 
-    // Check if response is HTML
+    // Check response type
     const contentType = searchResponse.headers.get('content-type') || '';
     if (contentType.includes('text/html')) {
       const html = await searchResponse.text();
-      console.log(`❌ HTML Response: ${html.substring(0, 200)}...`);
-      throw new Error('PITC server returned HTML (session expired or invalid request)');
+      console.error('❌ HTML Response received');
+      throw new Error('Server returned HTML - Session or network issue');
     }
 
     const searchData = await searchResponse.json();
@@ -100,4 +100,4 @@ export default async function handler(req, res) {
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
-        }
+}
