@@ -1,5 +1,5 @@
 // Credit: AZ Tricks (https://t.me/AZ_Tricks)
-import { authenticatedFetch } from '../lib/session.js';
+import { authenticatedFetch, checkSession } from '../lib/session.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -23,6 +23,12 @@ export default async function handler(req, res) {
   }
 
   try {
+    // 🔹 Check session first
+    const sessionStatus = await checkSession();
+    if (!sessionStatus.active) {
+      console.log('⚠️ Session not active, attempting to initialize...');
+    }
+
     console.log(`🔍 Searching for: ${searchTerm}`);
 
     // Step 1: Search
@@ -34,12 +40,9 @@ export default async function handler(req, res) {
       body: new URLSearchParams({ reference: searchTerm })
     });
 
-    // 🔹 Debug: Check response type
+    // Check if response is HTML
     const contentType = searchResponse.headers.get('content-type') || '';
-    console.log(`📄 Response Content-Type: ${contentType}`);
-
     if (contentType.includes('text/html')) {
-      // Agar HTML aaye toh error throw karein
       const html = await searchResponse.text();
       console.log(`❌ HTML Response: ${html.substring(0, 200)}...`);
       throw new Error('PITC server returned HTML (session expired or invalid request)');
@@ -59,7 +62,7 @@ export default async function handler(req, res) {
     const user = searchData.user;
     const refno = user.REFNO;
 
-    // Step 2: Feeder & User Details (Parallel)
+    // Step 2: Get all details
     const [feederRes, userDetailsRes] = await Promise.all([
       authenticatedFetch(`https://ccms.pitc.com.pk/getFeederDetails?reference=${refno}`),
       authenticatedFetch(`https://ccms.pitc.com.pk/api/details/user?reference=${refno}`)
@@ -97,4 +100,4 @@ export default async function handler(req, res) {
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
-}
+        }
