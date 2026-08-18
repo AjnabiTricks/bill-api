@@ -23,30 +23,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Check session first
-    const sessionStatus = await checkSession();
-    if (!sessionStatus.active) {
-      console.log('⚠️ Session not active, attempting to initialize...');
-    }
+    console.log(`🔍 Searching: ${searchTerm}`);
 
-    console.log(`🔍 Searching for: ${searchTerm}`);
-
-    // Step 1: Search
+    // Search via proxy
     const searchResponse = await authenticatedFetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' 
-      },
       body: new URLSearchParams({ reference: searchTerm })
     });
-
-    // Check response type
-    const contentType = searchResponse.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) {
-      const html = await searchResponse.text();
-      console.error('❌ HTML Response received');
-      throw new Error('Server returned HTML - Session or network issue');
-    }
 
     const searchData = await searchResponse.json();
 
@@ -62,7 +45,7 @@ export default async function handler(req, res) {
     const user = searchData.user;
     const refno = user.REFNO;
 
-    // Step 2: Get all details
+    // Get details
     const [feederRes, userDetailsRes] = await Promise.all([
       authenticatedFetch(`https://ccms.pitc.com.pk/getFeederDetails?reference=${refno}`),
       authenticatedFetch(`https://ccms.pitc.com.pk/api/details/user?reference=${refno}`)
@@ -95,7 +78,7 @@ export default async function handler(req, res) {
     console.error('❌ Error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Internal server error',
+      message: 'Search failed',
       error: error.message,
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
