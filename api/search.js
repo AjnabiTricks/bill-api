@@ -17,35 +17,22 @@ export default async function handler(req, res) {
   if (!searchTerm) {
     return res.status(400).json({
       success: false,
-      message: 'Search term required (cnic, mobile, reference, or q)',
+      message: 'Search term required',
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
 
   try {
-    // Check session first
-    const sessionStatus = await checkSession();
-    console.log('📊 Session status:', sessionStatus);
-
-    console.log(`🔍 Searching for: ${searchTerm}`);
-
-    // Step 1: Search
+    // Search via proxy
     const searchResponse = await authenticatedFetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-      },
       body: new URLSearchParams({ reference: searchTerm })
     });
 
-    // Check if response is JSON or HTML
+    // Check if valid JSON
     const contentType = searchResponse.headers.get('content-type') || '';
-    console.log(`📄 Content-Type: ${contentType}`);
-
     if (contentType.includes('text/html')) {
-      const html = await searchResponse.text();
-      console.error('❌ Received HTML:', html.substring(0, 200));
-      throw new Error('PITC server returned HTML - IP blocked or session invalid');
+      throw new Error('HTML received - proxy issue');
     }
 
     const searchData = await searchResponse.json();
@@ -54,7 +41,6 @@ export default async function handler(req, res) {
       return res.status(404).json({
         success: false,
         message: 'Consumer not found',
-        searchTerm: searchTerm,
         credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
       });
     }
@@ -62,7 +48,7 @@ export default async function handler(req, res) {
     const user = searchData.user;
     const refno = user.REFNO;
 
-    // Step 2: Get details
+    // Get details
     const [feederRes, userDetailsRes] = await Promise.all([
       authenticatedFetch(`https://ccms.pitc.com.pk/getFeederDetails?reference=${refno}`),
       authenticatedFetch(`https://ccms.pitc.com.pk/api/details/user?reference=${refno}`)
@@ -100,4 +86,4 @@ export default async function handler(req, res) {
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
-          }
+}
