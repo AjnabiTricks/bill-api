@@ -1,9 +1,6 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "public/index.html", "use": "@vercel/static" }
-  ],
-  "routes": [
-    { "src": "/", "dest": "/public/index.html" }
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/search" },
+    { "source": "/(.*)", "destination": "/api/search" }
   ]
 }
