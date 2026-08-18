@@ -23,13 +23,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    console.log(`🔍 Searching: ${searchTerm}`);
+    // Check session first
+    const sessionStatus = await checkSession();
+    console.log('📊 Session status:', sessionStatus);
 
-    // Search via proxy
+    console.log(`🔍 Searching for: ${searchTerm}`);
+
+    // Step 1: Search
     const searchResponse = await authenticatedFetch('https://ccms.pitc.com.pk/api/search', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+      },
       body: new URLSearchParams({ reference: searchTerm })
     });
+
+    // Check if response is JSON or HTML
+    const contentType = searchResponse.headers.get('content-type') || '';
+    console.log(`📄 Content-Type: ${contentType}`);
+
+    if (contentType.includes('text/html')) {
+      const html = await searchResponse.text();
+      console.error('❌ Received HTML:', html.substring(0, 200));
+      throw new Error('PITC server returned HTML - IP blocked or session invalid');
+    }
 
     const searchData = await searchResponse.json();
 
@@ -45,7 +62,7 @@ export default async function handler(req, res) {
     const user = searchData.user;
     const refno = user.REFNO;
 
-    // Get details
+    // Step 2: Get details
     const [feederRes, userDetailsRes] = await Promise.all([
       authenticatedFetch(`https://ccms.pitc.com.pk/getFeederDetails?reference=${refno}`),
       authenticatedFetch(`https://ccms.pitc.com.pk/api/details/user?reference=${refno}`)
@@ -83,4 +100,4 @@ export default async function handler(req, res) {
       credit: 'AZ Tricks (https://t.me/AZ_Tricks)'
     });
   }
-}
+          }
